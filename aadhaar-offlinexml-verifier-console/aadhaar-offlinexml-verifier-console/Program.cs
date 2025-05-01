@@ -1,10 +1,5 @@
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.X509;
 using System;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Xml;
+using System.IO;
 
 namespace aadhaar_offlinexml_verifier_console
 {
@@ -12,63 +7,118 @@ namespace aadhaar_offlinexml_verifier_console
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Hello World!");
-            string XMLFilePath = "D:\\Amit\\netAadhar\\offlineaadhaar20191121011352794.xml";
-            string KeyFilePath = "D:\\Amit\\netAadhar\\uidai_offline_publickey_19062019.cer";
-            XmlDocument ObjXmlDocument = new XmlDocument();
-            ObjXmlDocument.Load(XMLFilePath);
-            // XmlElement a = ObjXmlDocument.DocumentElement;            
-            // XmlNodeList b = a.ChildNodes;
-            string signatureValue = ObjXmlDocument.DocumentElement.ChildNodes[1].ChildNodes[1].InnerXml;
-            XmlNode childElement = ObjXmlDocument.DocumentElement.ChildNodes[1];
-            ObjXmlDocument.DocumentElement.RemoveChild(childElement);
-
-            /*----------------Read and parse the public key as string-----------------------*/
-            X509Certificate2 ObjX509Certificate2 = new X509Certificate2(KeyFilePath, "public"); //Initialize the public ket certificate file        
-            Org.BouncyCastle.X509.X509Certificate objX509Certificate;
-            X509CertificateParser objX509CertificateParser = new X509CertificateParser();
-            objX509Certificate = objX509CertificateParser.ReadCertificate(ObjX509Certificate2.GetRawCertData());
-            /*----------------End-----------------------*/
-
-
-            /* Init alg */
-            ISigner signer = SignerUtilities.GetSigner("SHA256withRSA");
-
-
-            /* Populate key */
-            signer.Init(false, objX509Certificate.GetPublicKey());
-
-            Console.WriteLine(signatureValue);
-            Console.WriteLine("\n\n\n");
-            Console.WriteLine(ObjXmlDocument.InnerXml);
-
-
-            /* Get the signature into bytes */
-            var expectedSig = Convert.FromBase64String(signatureValue);
-
-            Console.WriteLine("\n\n\n\n  expectedSig");
-            Console.WriteLine(Convert.ToString(expectedSig));
-            Console.WriteLine("\n\n\n\n");
-
-            /* Get the bytes to be signed from the string */
-            var msgBytes = Encoding.UTF8.GetBytes(ObjXmlDocument.InnerXml);
-
-            /* Calculate the signature and see if it matches */
-            signer.BlockUpdate(msgBytes, 0, msgBytes.Length);
-
-            bool Flag = signer.VerifySignature(expectedSig);
-            Console.WriteLine("\n\n\n");
-            if (Flag)
+            try
             {
-                Console.WriteLine("XML Validate Successfully");
+                var (xmlPath, certPath) = ParseArguments(args);
+                var verifier = new AadhaarVerifier();
+                bool isValid = verifier.VerifyXmlSignature(xmlPath, certPath);
+
+                Console.WriteLine(isValid ? "\n✅ Signature verification PASSED" : "\n❌ Signature verification FAILED");
             }
-            else
+            catch (Exception ex)
             {
-                Console.WriteLine("XML Validation Failed");
+                Console.WriteLine($"\n⚠️ Error: {ex.Message}");
+                DisplayHelp();
             }
-
-
+            
+            Console.WriteLine("\nPress any key to exit...");
             Console.ReadKey();
+        }
+
+        private static (string xmlPath, string certPath) ParseArguments(string[] args)
+        {
+            string xmlPath = null;
+            string certPath = null;
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                switch (args[i].ToLower())
+                {
+                    case "-h":
+                    case "--help":
+                        DisplayHelp();
+                        Environment.Exit(0);
+                        break;
+                    case "-x":
+                    case "--xml":
+                        if (i + 1 >= args.Length) throw new ArgumentException("Missing XML file path");
+                        xmlPath = args[++i];
+                        break;
+                    case "-c":
+                    case "--cert":
+                        if (i + 1 >= args.Length) throw new ArgumentException("Missing certificate file path");
+                        certPath = args[++i];
+                        break;
+                    default:
+                        if (xmlPath == null && IsXmlFile(args[i]))
+                        {
+                            xmlPath = args[i];
+                        }
+                        else if (certPath == null && IsCertFile(args[i]))
+                        {
+                            certPath = args[i];
+                        }
+                        break;
+                }
+            }
+
+            if (xmlPath == null) xmlPath = PromptForFile("Enter XML file path: ", ".xml");
+            if (certPath == null) certPath = PromptForFile("Enter certificate path: ", ".cer");
+
+            return (xmlPath, certPath);
+        }
+
+        private static string PromptForFile(string prompt, string extension)
+        {
+            string path;
+            do
+            {
+                Console.Write(prompt);
+                path = Console.ReadLine()?.Trim();
+            } while (!IsValidFile(path, extension));
+            
+            return path;
+        }
+
+        private static bool IsValidFile(string path, string extension)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            if (!File.Exists(path))
+            {
+                Console.WriteLine($"File not found: {path}");
+                return false;
+            }
+            if (!Path.GetExtension(path).Equals(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"Invalid file type. Expected {extension.ToUpper()}");
+                return false;
+            }
+            return true;
+        }
+
+        private static bool IsXmlFile(string path) => 
+            Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsCertFile(string path) => 
+            Path.GetExtension(path).Equals(".cer", StringComparison.OrdinalIgnoreCase);
+
+        private static void DisplayHelp()
+        {
+            Console.WriteLine(@"
+Aadhaar Offline XML Signature Verifier
+=======================================
+Usage:
+  aadhaar-verifier [options]
+
+Options:
+  -x, --xml <path>    Path to Aadhaar XML file
+  -c, --cert <path>   Path to UIDAI public certificate (.cer)
+  -h, --help          Show this help message
+
+Examples:
+  aadhaar-verifier -x ""My Aadhaar.xml"" -c ""UIDAI.cer""
+  aadhaar-verifier ""My Aadhaar.xml"" ""UIDAI.cer""
+");
         }
     }
 }
